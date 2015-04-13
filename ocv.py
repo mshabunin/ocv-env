@@ -10,6 +10,16 @@ import logging as log
 import concurrent.futures
 from tempfile import NamedTemporaryFile
 
+# Some config here
+the_upstream = "https://github.com/Itseez/%(repo)s.git"
+the_custom_remote = "git@github.com:mshabunin/%(repo)s.git"
+the_env_script = """# Add some useful environment variables here:
+export OPENCV_TEST_DATA_PATH=%(path)s/opencv_extra/testdata
+export ANDROID_NDK=/home/maksim/android-ndk-r10
+export ANDROID_SDK=/home/maksim/android-sdk-linux
+export PYTHONPATH=%(path)s/build/lib
+"""
+
 def update_one_repo(repo, path):
     r = os.path.join(path, repo)
     out = NamedTemporaryFile()
@@ -24,15 +34,14 @@ def init_one_repo(repo, template, path, branch, check_user=None, check_branch=No
     r = os.path.abspath(os.path.join(path, repo))
     t = os.path.abspath(os.path.join(template, repo))
     out = NamedTemporaryFile()
-    upstream = "https://github.com/Itseez/%s.git" % repo
-    custom = "git@github.com:mshabunin/%s.git" % repo
     log.info("clone %s", repo)
     call(["git", "clone", t, r], stdout=out, stderr=STDOUT)
-    call(["git", "-C", r, "remote", "add", "upstream", upstream], stdout=out, stderr=STDOUT)
+    call(["git", "-C", r, "remote", "add", "upstream", the_upstream % {'repo':repo}], stdout=out, stderr=STDOUT)
     call(["git", "-C", r, "remote", "set-url", "--push", "upstream", "bad_url"], stdout=out, stderr=STDOUT)
     call(["git", "-C", r, "remote", "add", "template", t + ".git"], stdout=out, stderr=STDOUT)
     call(["git", "-C", r, "remote", "set-url", "--push", "template", "bad_url"], stdout=out, stderr=STDOUT)
-    call(["git", "-C", r, "remote", "set-url", "origin", custom], stdout=out, stderr=STDOUT)
+    call(["git", "-C", r, "remote", "set-url", "origin", the_custom_remote % {'repo':repo}], stdout=out, stderr=STDOUT)
+    log.info("fetch %s/%s", repo, branch)
     call(["git", "-C", r, "fetch", "upstream", branch], stdout=out, stderr=STDOUT)
     call(["git", "-C", r, "checkout", "upstream/%s" % branch, "-B", branch], stdout=out, stderr=STDOUT)
     if not (check_user is None or check_branch is None):
@@ -40,26 +49,20 @@ def init_one_repo(repo, template, path, branch, check_user=None, check_branch=No
         branches = check_output(["git", "ls-remote","--heads", url], universal_newlines=True, stderr=STDOUT)
         rx = search("refs/heads/%s$" % check_branch, branches, MULTILINE)
         if rx:
-            log.info("Adding remote 'checked' from %s/%s and pulling %s", check_user, repo, check_branch)
+            log.info("checked remote: %s/%s:%s", check_user, repo, check_branch)
             call(["git", "-C", r, "remote", "add", "checked", url], stdout=out, stderr=STDOUT)
             call(["git", "-C", r, "remote", "set-url", "--push", "checked", "bad_url"], stdout=out, stderr=STDOUT)
             call(["git", "-C", r, "pull", "--no-edit", "checked", check_branch], stdout=out, stderr=STDOUT)
         else:
-            log.info("Branch '%s' not found in %s/%s - skip", check_branch, check_user, repo)
+            log.info("skip check: %s/%s:%s", check_user, repo, check_branch)
     call(["git", "-C", r, "remote", "-v"], stdout=out, stderr=STDOUT)
     log.debug("finished %s", repo)
     out.seek(0)
     return out.readlines()
 
 def init_env_script(path):
-    text = """# Add some useful environment variables here:
-export OPENCV_TEST_DATA_PATH=%(path)s/opencv_extra/testdata
-export ANDROID_NDK=/home/maksim/android-ndk-r10
-export ANDROID_SDK=/home/maksim/android-sdk-linux
-export PYTHONPATH=%(path)s/build/lib
-"""
     with open(os.path.join(path, "env.sh"), "w") as f:
-        f.write(text % {'path':os.path.abspath(path)})
+        f.write(the_env_script % {'path':os.path.abspath(path)})
 
 def init_subl_project(path, repos):
     path = os.path.abspath(path)
@@ -151,7 +154,7 @@ if __name__ == "__main__":
             def one_call(repo):
                 return init_one_repo(repo, args.template, args.dir, args.branch, user, branch)
             for out in e.map(one_call, repos):
-                log.debug("Output:\n" + "".join(["\t" + line for line in out]))
+                log.debug("Output:\n" + "".join(["> " + line for line in out]))
         init_env_script(args.dir)
         init_subl_project(args.dir, [repos[0], repos[1]])
     elif args.cmd == "update":
