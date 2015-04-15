@@ -20,6 +20,28 @@ export ANDROID_SDK=/home/maksim/android-sdk-linux
 export PYTHONPATH=%(path)s/build/lib
 """
 
+class Executor:
+    def __init__(self):
+        self.out = NamedTemporaryFile()
+    def call(self, cmd):
+        call(cmd, stdout=self.out, stderr=STDOUT)
+    def finish(self):
+        self.out.seek(0)
+        return self.out.readlines()
+
+def init_one_template(repo, template):
+    t = os.path.abspath(os.path.join(template, repo)) + ".git"
+    out = NamedTemporaryFile()
+    log.info("init %s", repo)
+    call(["git", "clone", "--mirror", the_upstream % {'repo':repo}, t], stdout=out, stderr=STDOUT)
+    call(["git", "-C", t, "remote", "set-url", "--push", "origin", "bad_url"], stdout=out, stderr=STDOUT)
+    call(["git", "-C", t, "config", "--unset-all", "remote.origin.fetch"], stdout=out, stderr=STDOUT)
+    call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"], stdout=out, stderr=STDOUT)
+    call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*"], stdout=out, stderr=STDOUT)
+    log.debug("finished %s", repo)
+    out.seek(0)
+    return out.readlines()
+
 def update_one_repo(repo, path):
     r = os.path.join(path, repo)
     out = NamedTemporaryFile()
@@ -115,6 +137,7 @@ if __name__ == "__main__":
     parser = ArgumentParser(description = 'Command-line tool to work with OpenCV dev environment')
     parser.add_argument('--template', default='.template', metavar='dir', help='Template dir with local mirrors (default is ".template")')
     parser.add_argument('-v', action='store_true', help='Verbose logging')
+    parser.add_argument('--slow', action='store_true', help='Do not use multiprocessing')
     sub = parser.add_subparsers(title='Commands', dest='cmd')
 
     # Init new template folder
@@ -142,8 +165,17 @@ if __name__ == "__main__":
         if check_template_folder(args.template):
             log.error("Template directory already exists")
             exit(2)
-        log.error("Not implemented!")
-        pass
+        os.makedirs(os.path.abspath(args.template))
+        if args.slow:
+            for repo in repos:
+                out = init_one_template(repo, args.template)
+        else:
+            with concurrent.futures.ProcessPoolExecutor() as e:
+                def one_call(repo):
+                    return init_one_template(repo, args.template)
+                for out in e.map(one_call, repos):
+                    log.debug("Output:\n" + "".join(["> " + line for line in out]))
+
     elif args.cmd == "create":
         log.info("Create")
         if not check_template_folder(args.template):
@@ -167,13 +199,16 @@ if __name__ == "__main__":
                 log.error("Should be in form: <user>:<branch>")
                 sys.exit(2)
         os.makedirs(os.path.join(args.dir, "build"))
-        with concurrent.futures.ProcessPoolExecutor() as e:
-            def one_call(repo):
-                return init_one_repo(repo, args.template, args.dir, args.branch, user, branch)
-            for out in e.map(one_call, repos):
+        if args.slow:
+            for repo in repos:
+                out = init_one_repo(repo, args.template, args.dir, args.branch, user, branch)
                 log.debug("Output:\n" + "".join(["> " + line for line in out]))
-        # for repo in repos:
-        #     init_one_repo(repo, args.template, args.dir, args.branch, user, branch)
+        else:
+            with concurrent.futures.ProcessPoolExecutor() as e:
+                def one_call(repo):
+                    return init_one_repo(repo, args.template, args.dir, args.branch, user, branch)
+                for out in e.map(one_call, repos):
+                    log.debug("Output:\n" + "".join(["> " + line for line in out]))
         init_env_script(args.dir)
         init_subl_project(args.dir, [repos[0], repos[1]])
     elif args.cmd == "update":
@@ -184,11 +219,16 @@ if __name__ == "__main__":
         if not check_clone_folder(args.dir):
             log.error("Clone directory does not exist")
             exit(2)
-        with concurrent.futures.ProcessPoolExecutor() as e:
-            def one_call(repo):
-                return update_one_repo(repo, args.dir)
-            for out in e.map(one_call, repos):
+        if args.slow:
+            for repo in repos:
+                out = update_one_repo(repo, args.dir)
                 log.debug("Output:\n" + "".join(["\t" + line for line in out]))
+        else:
+            with concurrent.futures.ProcessPoolExecutor() as e:
+                def one_call(repo):
+                    return update_one_repo(repo, args.dir)
+                for out in e.map(one_call, repos):
+                    log.debug("Output:\n" + "".join(["\t" + line for line in out]))
     else:
         log.error("Bad command: %s", args.cmd)
         sys.exit(2)
