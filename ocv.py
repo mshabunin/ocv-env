@@ -4,7 +4,7 @@ from argparse import ArgumentParser
 from re import search, MULTILINE
 from subprocess import call, check_output, STDOUT
 import os.path
-from shutil import rmtree
+from shutil import rmtree, copy2
 import sys
 import logging as log
 import concurrent.futures
@@ -56,9 +56,26 @@ def init_one_repo(repo, template, path, branch, check_user=None, check_branch=No
         else:
             log.info("skip check: %s/%s:%s", check_user, repo, check_branch)
     call(["git", "-C", r, "remote", "-v"], stdout=out, stderr=STDOUT)
+    if os.path.exists(t):
+        copy_template_files(repo, t, r)
     log.debug("finished %s", repo)
     out.seek(0)
     return out.readlines()
+
+def copy_template_files(repo, src, dst):
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        for f in files:
+            s = os.path.join(src, rel, f)
+            d = os.path.join(dst, rel, f)
+            if not os.path.exists(d):
+                log.debug("%s: copy %s", repo, rel)
+                copy2(s, d)
+        for f in dirs:
+            d = os.path.join(dst, rel, f)
+            if not os.path.exists(d):
+                log.debug("%s: create %s", repo, d)
+                os.mkdir(d)
 
 def init_env_script(path):
     with open(os.path.join(path, "env.sh"), "w") as f:
@@ -149,12 +166,14 @@ if __name__ == "__main__":
                 log.error("Bad argument: %s", args.check)
                 log.error("Should be in form: <user>:<branch>")
                 sys.exit(2)
-        os.makedirs(args.dir)
+        os.makedirs(os.path.join(args.dir, "build"))
         with concurrent.futures.ProcessPoolExecutor() as e:
             def one_call(repo):
                 return init_one_repo(repo, args.template, args.dir, args.branch, user, branch)
             for out in e.map(one_call, repos):
                 log.debug("Output:\n" + "".join(["> " + line for line in out]))
+        # for repo in repos:
+        #     init_one_repo(repo, args.template, args.dir, args.branch, user, branch)
         init_env_script(args.dir)
         init_subl_project(args.dir, [repos[0], repos[1]])
     elif args.cmd == "update":
