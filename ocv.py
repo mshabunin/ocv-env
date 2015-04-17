@@ -11,6 +11,7 @@ import concurrent.futures
 from tempfile import NamedTemporaryFile
 
 # Some config here
+the_repos = ["opencv", "opencv_contrib", "opencv_extra"]
 the_upstream = "https://github.com/Itseez/%(repo)s.git"
 the_custom_remote = "git@github.com:mshabunin/%(repo)s.git"
 the_env_script = """# Add some useful environment variables here:
@@ -18,6 +19,19 @@ export OPENCV_TEST_DATA_PATH=%(path)s/opencv_extra/testdata
 export ANDROID_NDK=/home/maksim/android-ndk-r10
 export ANDROID_SDK=/home/maksim/android-sdk-linux
 export PYTHONPATH=%(path)s/build/lib
+"""
+the_subl_project = """# Sublime Text project for OpenCV
+{
+    "folders":
+    [
+        {
+            "path":"opencv"
+        },
+        {
+            "path":"opencv_contrib"
+        }
+    ]
+}
 """
 
 class Executor:
@@ -31,58 +45,59 @@ class Executor:
 
 def init_one_template(repo, template):
     t = os.path.abspath(os.path.join(template, repo)) + ".git"
-    out = NamedTemporaryFile()
-    log.info("init %s", repo)
-    call(["git", "clone", "--mirror", the_upstream % {'repo':repo}, t], stdout=out, stderr=STDOUT)
-    call(["git", "-C", t, "remote", "set-url", "--push", "origin", "bad_url"], stdout=out, stderr=STDOUT)
-    call(["git", "-C", t, "config", "--unset-all", "remote.origin.fetch"], stdout=out, stderr=STDOUT)
-    call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"], stdout=out, stderr=STDOUT)
-    call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*"], stdout=out, stderr=STDOUT)
-    log.debug("finished %s", repo)
-    out.seek(0)
-    return out.readlines()
+    e = Executor()
+    log.info("%s: init template", repo)
+    e.call(["git", "clone", "--mirror", the_upstream % {'repo':repo}, t])
+    e.call(["git", "-C", t, "remote", "set-url", "--push", "origin", "bad_url"])
+    e.call(["git", "-C", t, "config", "--unset-all", "remote.origin.fetch"])
+    e.call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"])
+    e.call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*"])
+    log.debug("%s: done", repo)
+    return e.finish()
 
 def update_one_repo(repo, path):
     r = os.path.join(path, repo)
-    out = NamedTemporaryFile()
-    log.info("fetch %s", repo)
+    e = Executor()
     for remote in ["template", "upstream", "origin"]:
-        call(["git", "-C", r, "fetch", remote, "-v"], stdout=out, stderr=STDOUT)
-    log.debug("finished %s", repo)
-    out.seek(0)
-    return out.readlines()
+        log.info("%s: update %s", repo, remote)
+        e.call(["git", "-C", r, "fetch", remote, "-v"])
+    log.debug("%s: done", repo)
+    return e.finish()
+
+def is_branch_exist(repo, check_user, check_branch):
+    url = "git@github.com:%s/%s.git" % (check_user, repo)
+    branches = check_output(["git", "ls-remote","--heads", url], universal_newlines=True, stderr=STDOUT)
+    rx = search("refs/heads/%s$" % check_branch, branches, MULTILINE)
+    return rx is not None
 
 def init_one_repo(repo, template, path, branch, check_user=None, check_branch=None):
     r = os.path.abspath(os.path.join(path, repo))
     t = os.path.abspath(os.path.join(template, repo))
-    out = NamedTemporaryFile()
-    log.info("clone %s", repo)
-    call(["git", "clone", t, r], stdout=out, stderr=STDOUT)
-    call(["git", "-C", r, "remote", "add", "upstream", the_upstream % {'repo':repo}], stdout=out, stderr=STDOUT)
-    call(["git", "-C", r, "remote", "set-url", "--push", "upstream", "bad_url"], stdout=out, stderr=STDOUT)
-    call(["git", "-C", r, "remote", "add", "template", t + ".git"], stdout=out, stderr=STDOUT)
-    call(["git", "-C", r, "remote", "set-url", "--push", "template", "bad_url"], stdout=out, stderr=STDOUT)
-    call(["git", "-C", r, "remote", "set-url", "origin", the_custom_remote % {'repo':repo}], stdout=out, stderr=STDOUT)
-    log.info("fetch %s/%s", repo, branch)
-    call(["git", "-C", r, "fetch", "upstream", branch], stdout=out, stderr=STDOUT)
-    call(["git", "-C", r, "checkout", "upstream/%s" % branch, "-B", branch], stdout=out, stderr=STDOUT)
+    e = Executor()
+    log.info("%s: clone", repo)
+    e.call(["git", "clone", t, r])
+    e.call(["git", "-C", r, "remote", "add", "upstream", the_upstream % {'repo':repo}])
+    e.call(["git", "-C", r, "remote", "set-url", "--push", "upstream", "bad_url"])
+    e.call(["git", "-C", r, "remote", "add", "template", t + ".git"])
+    e.call(["git", "-C", r, "remote", "set-url", "--push", "template", "bad_url"])
+    e.call(["git", "-C", r, "remote", "set-url", "origin", the_custom_remote % {'repo':repo}])
+    log.info("%s: fetch %s", repo, branch)
+    e.call(["git", "-C", r, "fetch", "upstream", branch])
+    e.call(["git", "-C", r, "checkout", "upstream/%s" % branch, "-B", branch])
     if not (check_user is None or check_branch is None):
-        url = "git@github.com:%s/%s.git" % (check_user, repo)
-        branches = check_output(["git", "ls-remote","--heads", url], universal_newlines=True, stderr=STDOUT)
-        rx = search("refs/heads/%s$" % check_branch, branches, MULTILINE)
-        if rx:
-            log.info("checked remote: %s/%s:%s", check_user, repo, check_branch)
-            call(["git", "-C", r, "remote", "add", "checked", url], stdout=out, stderr=STDOUT)
-            call(["git", "-C", r, "remote", "set-url", "--push", "checked", "bad_url"], stdout=out, stderr=STDOUT)
-            call(["git", "-C", r, "pull", "--no-edit", "checked", check_branch], stdout=out, stderr=STDOUT)
+        if is_branch_exist(repo, check_user, check_branch):
+            url = "git@github.com:%s/%s.git" % (check_user, repo)
+            log.info("%s: pull %s:%s", repo, check_user, check_branch)
+            e.call(["git", "-C", r, "remote", "add", "checked", url])
+            e.call(["git", "-C", r, "remote", "set-url", "--push", "checked", "bad_url"])
+            e.call(["git", "-C", r, "pull", "--no-edit", "checked", check_branch])
         else:
-            log.info("skip check: %s/%s:%s", check_user, repo, check_branch)
-    call(["git", "-C", r, "remote", "-v"], stdout=out, stderr=STDOUT)
+            log.info("%s: skip pull %s:%s", repo, check_user, check_branch)
+    e.call(["git", "-C", r, "remote", "-v"])
     if os.path.exists(t):
         copy_template_files(repo, t, r)
-    log.debug("finished %s", repo)
-    out.seek(0)
-    return out.readlines()
+    log.debug("%s: done", repo)
+    return e.finish()
 
 def copy_template_files(repo, src, dst):
     for root, dirs, files in os.walk(src):
@@ -100,23 +115,12 @@ def copy_template_files(repo, src, dst):
                 os.mkdir(d)
 
 def init_env_script(path):
-    with open(os.path.join(path, "env.sh"), "w") as f:
+    with open(os.path.join(os.path.abspath(path), "env.sh"), "w") as f:
         f.write(the_env_script % {'path':os.path.abspath(path)})
 
-def init_subl_project(path, repos):
-    path = os.path.abspath(path)
-    text = """# Sublime Text project for OpenCV
-{
-    "folders":
-    [
-        %s
-    ]
-}
-"""
-    sub = ",".join(['{"path": "%s"}' % r for r in repos])
-    text = text % sub
-    with open(os.path.join(path, "ocv.sublime-project"), "w") as f:
-        f.write(text)
+def init_subl_project(path):
+    with open(os.path.join(os.path.abspath(path), "ocv.sublime-project"), "w") as f:
+        f.write(the_subl_project)
 
 def check_template_folder(folder):
     # TODO: also check contains - mirrors
@@ -130,10 +134,75 @@ def check_clone_folder(folder):
         return False
     return True
 
-if __name__ == "__main__":
-    commands = ["init", "create", "update"]
-    repos = ["opencv", "opencv_contrib", "opencv_extra"]
+class Fail(Exception):
+    def __init__(self, text=None):
+        self.t = text
+    def __str__(self):
+        return "ERROR" if self.t is None else self.t
 
+class Worker:
+    def __init__(self, repos, template, slow):
+        self.repos = repos
+        self.template = template
+        self.slow = slow
+
+    #-----------------------
+    # Command handlers
+    #-----------------------
+    def init(self):
+        log.info("Init")
+        if check_template_folder(self.template):
+            raise Fail("Template directory already exists")
+        os.makedirs(os.path.abspath(self.template))
+        self.multi_run(lambda repo: init_one_template(repo, self.template))
+
+    def create(self, dir, check, b, force):
+        log.info("Create")
+        if not check_template_folder(self.template):
+            raise Fail("Template directory does not exist")
+        if check_clone_folder(dir):
+            if force:
+                log.info("Removing existing directory '%s'", dir)
+                rmtree(dir)
+            else:
+                raise Fail("Clone directory already exists '%s', you can use the --force option to remove it" % dir)
+        user, branch = None, None
+        if check:
+            rx = search("^([^:]+):([^:]+)$", check)
+            if rx:
+                user, branch = rx.group(1), rx.group(2)
+                log.debug("USER: %s, BRANCH: %s", user, branch)
+            else:
+                raise Fail("Bad argument: %s, should be in form user:branch" % check)
+        os.makedirs(os.path.join(dir, "build"))
+        self.multi_run(lambda repo: init_one_repo(repo, self.template, dir, b, user, branch))
+        init_env_script(dir)
+        init_subl_project(dir)
+
+    def update(self, dir):
+        log.info("Update")
+        if not check_template_folder(self.template):
+            raise Fail("Template directory does not exist")
+        if not check_clone_folder(dir):
+            raise Fail("Clone directory does not exist")
+        self.multi_run(lambda repo: update_one_repo(repo, dir))
+
+    #-----------------------
+    # Utility methods
+    #-----------------------
+    def multi_run(self, func):
+        if self.slow:
+            for out in map(func, self.repos):
+                log.debug("Output:\n" + "".join(["> " + line for line in out]))
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as e:
+                for out in e.map(func, self.repos):
+                    log.debug("Output:\n" + "".join(["> " + line for line in out]))
+
+#----------------------
+# Main
+#----------------------
+if __name__ == "__main__":
     parser = ArgumentParser(description = 'Command-line tool to work with OpenCV dev environment')
     parser.add_argument('--template', default='.template', metavar='dir', help='Template dir with local mirrors (default is ".template")')
     parser.add_argument('-v', action='store_true', help='Verbose logging')
@@ -156,79 +225,20 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    log.basicConfig(format='[%(levelname)s] %(message)s', level=log.DEBUG if args.v else log.WARNING)
+    # log.basicConfig(format='[%(levelname)s] %(message)s', level=log.DEBUG if args.v else log.WARNING)
+    log.basicConfig(format='[%(levelno)s] %(message)s', level=log.DEBUG if args.v else log.WARNING)
     log.debug("Args: %s", args)
 
-    # Create
-    if args.cmd == "init":
-        log.info("Init")
-        if check_template_folder(args.template):
-            log.error("Template directory already exists")
-            exit(2)
-        os.makedirs(os.path.abspath(args.template))
-        if args.slow:
-            for repo in repos:
-                out = init_one_template(repo, args.template)
+    try:
+        w = Worker(the_repos, args.template, args.slow)
+        if args.cmd == "init":
+            w.init()
+        elif args.cmd == "create":
+            w.create(args.dir, args.check, args.branch, args.force)
+        elif args.cmd == "update":
+            w.update(args.dir)
         else:
-            with concurrent.futures.ProcessPoolExecutor() as e:
-                def one_call(repo):
-                    return init_one_template(repo, args.template)
-                for out in e.map(one_call, repos):
-                    log.debug("Output:\n" + "".join(["> " + line for line in out]))
-
-    elif args.cmd == "create":
-        log.info("Create")
-        if not check_template_folder(args.template):
-            log.error("Template directory does not exist")
-            exit(2)
-        if check_clone_folder(args.dir):
-            if args.force:
-                log.info("Removing existing directory '%s'", args.dir)
-                rmtree(args.dir)
-            else:
-                log.error("Clone directory already exists '%s', you can use the --force option to remove it", args.dir)
-                exit(2)
-        user, branch = None, None
-        if args.check:
-            rx = search("^([^:]+):([^:]+)$", args.check)
-            if rx:
-                user, branch = rx.group(1), rx.group(2)
-                log.debug("USER: %s, BRANCH: %s", user, branch)
-            else:
-                log.error("Bad argument: %s", args.check)
-                log.error("Should be in form: <user>:<branch>")
-                sys.exit(2)
-        os.makedirs(os.path.join(args.dir, "build"))
-        if args.slow:
-            for repo in repos:
-                out = init_one_repo(repo, args.template, args.dir, args.branch, user, branch)
-                log.debug("Output:\n" + "".join(["> " + line for line in out]))
-        else:
-            with concurrent.futures.ProcessPoolExecutor() as e:
-                def one_call(repo):
-                    return init_one_repo(repo, args.template, args.dir, args.branch, user, branch)
-                for out in e.map(one_call, repos):
-                    log.debug("Output:\n" + "".join(["> " + line for line in out]))
-        init_env_script(args.dir)
-        init_subl_project(args.dir, [repos[0], repos[1]])
-    elif args.cmd == "update":
-        log.info("Update")
-        if not check_template_folder(args.template):
-            log.error("Template directory does not exist")
-            exit(2)
-        if not check_clone_folder(args.dir):
-            log.error("Clone directory does not exist")
-            exit(2)
-        if args.slow:
-            for repo in repos:
-                out = update_one_repo(repo, args.dir)
-                log.debug("Output:\n" + "".join(["\t" + line for line in out]))
-        else:
-            with concurrent.futures.ProcessPoolExecutor() as e:
-                def one_call(repo):
-                    return update_one_repo(repo, args.dir)
-                for out in e.map(one_call, repos):
-                    log.debug("Output:\n" + "".join(["\t" + line for line in out]))
-    else:
-        log.error("Bad command: %s", args.cmd)
-        sys.exit(2)
+            raise Fail("Bad command: %s" % args.cmd)
+    except Fail as e:
+        log.error("Fail: %s", e)
+        sys.exit(1)
