@@ -11,17 +11,24 @@ import concurrent.futures
 from tempfile import NamedTemporaryFile
 
 # Some config here
-the_repos = ["opencv", "opencv_contrib", "opencv_extra"]
-the_upstream = "https://github.com/Itseez/%(repo)s.git"
-the_custom_remote = "git@github.com:mshabunin/%(repo)s.git"
-the_env_script = """# Add some useful environment variables here:
+config = {
+
+"repos": ["opencv", "opencv_contrib", "opencv_extra"],
+
+"upstream": "https://github.com/Itseez/%(repo)s.git",
+
+"custom": "git@github.com:mshabunin/%(repo)s.git",
+
+"env_script":
+"""# Some useful environment variables here
 export OPENCV_TEST_DATA_PATH=%(path)s/opencv_extra/testdata
 export ANDROID_NDK=/home/maksim/android-ndk-r10
 export ANDROID_SDK=/home/maksim/android-sdk-linux
 export PYTHONPATH=%(path)s/build/lib
-"""
-the_subl_project = """# Sublime Text project for OpenCV
-{
+""",
+
+"subl_project":
+"""{
     "folders":
     [
         {
@@ -33,6 +40,7 @@ the_subl_project = """# Sublime Text project for OpenCV
     ]
 }
 """
+}
 
 class Executor:
     def __init__(self):
@@ -47,7 +55,7 @@ def init_one_template(repo, template):
     t = os.path.abspath(os.path.join(template, repo)) + ".git"
     e = Executor()
     log.info("%s: init template", repo)
-    e.call(["git", "clone", "--mirror", the_upstream % {'repo':repo}, t])
+    e.call(["git", "clone", "--mirror", config['upstream'] % {'repo':repo}, t])
     e.call(["git", "-C", t, "remote", "set-url", "--push", "origin", "bad_url"])
     e.call(["git", "-C", t, "config", "--unset-all", "remote.origin.fetch"])
     e.call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"])
@@ -76,11 +84,11 @@ def init_one_repo(repo, template, path, branch, check_user=None, check_branch=No
     e = Executor()
     log.info("%s: clone", repo)
     e.call(["git", "clone", t, r])
-    e.call(["git", "-C", r, "remote", "add", "upstream", the_upstream % {'repo':repo}])
+    e.call(["git", "-C", r, "remote", "add", "upstream", config['upstream'] % {'repo':repo}])
     e.call(["git", "-C", r, "remote", "set-url", "--push", "upstream", "bad_url"])
     e.call(["git", "-C", r, "remote", "add", "template", t + ".git"])
     e.call(["git", "-C", r, "remote", "set-url", "--push", "template", "bad_url"])
-    e.call(["git", "-C", r, "remote", "set-url", "origin", the_custom_remote % {'repo':repo}])
+    e.call(["git", "-C", r, "remote", "set-url", "origin", config['custom'] % {'repo':repo}])
     log.info("%s: fetch %s", repo, branch)
     e.call(["git", "-C", r, "fetch", "upstream", branch])
     e.call(["git", "-C", r, "checkout", "upstream/%s" % branch, "-B", branch])
@@ -116,11 +124,11 @@ def copy_template_files(repo, src, dst):
 
 def init_env_script(path):
     with open(os.path.join(os.path.abspath(path), "env.sh"), "w") as f:
-        f.write(the_env_script % {'path':os.path.abspath(path)})
+        f.write(config['env_script'] % {'path':os.path.abspath(path)})
 
 def init_subl_project(path):
     with open(os.path.join(os.path.abspath(path), "ocv.sublime-project"), "w") as f:
-        f.write(the_subl_project)
+        f.write(config['subl_project'])
 
 def check_template_folder(folder):
     # TODO: also check contains - mirrors
@@ -156,7 +164,7 @@ class Worker:
         os.makedirs(os.path.abspath(self.template))
         self.multi_run(lambda repo: init_one_template(repo, self.template))
 
-    def create(self, dir, check, b, force):
+    def create(self, dir, check, checkout_branch, force):
         log.info("Create")
         if not check_template_folder(self.template):
             raise Fail("Template directory does not exist")
@@ -175,7 +183,7 @@ class Worker:
             else:
                 raise Fail("Bad argument: %s, should be in form user:branch" % check)
         os.makedirs(os.path.join(dir, "build"))
-        self.multi_run(lambda repo: init_one_repo(repo, self.template, dir, b, user, branch))
+        self.multi_run(lambda repo: init_one_repo(repo, self.template, dir, checkout_branch, user, branch))
         init_env_script(dir)
         init_subl_project(dir)
 
@@ -223,6 +231,11 @@ if __name__ == "__main__":
     parser_update = sub.add_parser('update', help='Update existing clone set')
     parser_update.add_argument('dir', metavar='dir', help='Directory containing the clone set to update')
 
+    # TODO:
+    # - build (creates some scripts: debug/release, shared/static, +install, docs)
+    #   ??? or copy some files from template folder
+    # - clean build (rm -rf build/*), clean repos (reset --hard, clean -f)
+
     args = parser.parse_args()
 
     # log.basicConfig(format='[%(levelname)s] %(message)s', level=log.DEBUG if args.v else log.WARNING)
@@ -230,7 +243,7 @@ if __name__ == "__main__":
     log.debug("Args: %s", args)
 
     try:
-        w = Worker(the_repos, args.template, args.slow)
+        w = Worker(config['repos'], args.template, args.slow)
         if args.cmd == "init":
             w.init()
         elif args.cmd == "create":
