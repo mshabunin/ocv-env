@@ -2,7 +2,7 @@
 
 from argparse import ArgumentParser
 from re import search, MULTILINE
-from subprocess import call, check_output, STDOUT
+from subprocess import call, check_output, STDOUT, CalledProcessError
 import os.path
 from shutil import rmtree, copy2
 import sys
@@ -74,9 +74,16 @@ def update_one_repo(repo, path):
 
 def is_branch_exist(repo, check_user, check_branch):
     url = "git@github.com:%s/%s.git" % (check_user, repo)
-    branches = check_output(["git", "ls-remote","--heads", url], universal_newlines=True, stderr=STDOUT)
-    rx = search("refs/heads/%s$" % check_branch, branches, MULTILINE)
-    return rx is not None
+    try:
+        branches = check_output(["git", "ls-remote","--heads", url], universal_newlines=True, stderr=STDOUT)
+        rx = search("refs/heads/%s$" % check_branch, branches, MULTILINE)
+    except CalledProcessError as e:
+        log.warning("%s: no branch %s:%s - returned %s", repo, check_user, check_branch, e.returncode)
+        return False
+    if rx is None:
+        log.warning("%s: no branch %s:%s - not found", repo, check_user, check_branch)
+        return False
+    return True
 
 def init_one_repo(repo, template, path, branch, check_user=None, check_branch=None):
     r = os.path.abspath(os.path.join(path, repo))
