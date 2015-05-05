@@ -253,7 +253,7 @@ if __name__ == "__main__":
     parser_update.add_argument('dir', metavar='dir', help='Directory containing the clone set to update')
 
     # Update template
-    parser_update = sub.add_parser('update_template', help='Update template state')
+    parser_update_template = sub.add_parser('update_template', help='Update template state')
 
     # TODO:
     # - build (creates some scripts: debug/release, shared/static, +install, docs)
