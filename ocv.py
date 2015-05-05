@@ -72,6 +72,14 @@ def update_one_repo(repo, path):
     log.debug("%s: done", repo)
     return e.finish()
 
+def update_template_repo(repo, path):
+    r = os.path.join(path, repo) + ".git"
+    e = Executor()
+    log.info("%s: template update", repo)
+    e.call(["git", "-C", r, "remote", "update", "--prune"])
+    log.debug("%s: done", repo)
+    return e.finish()
+
 def is_branch_exist(repo, check_user, check_branch):
     url = "git@github.com:%s/%s.git" % (check_user, repo)
     try:
@@ -202,6 +210,12 @@ class Worker:
             raise Fail("Clone directory does not exist")
         self.multi_run(lambda repo: update_one_repo(repo, dir))
 
+    def update_template(self):
+        log.info("Update")
+        if not check_template_folder(self.template):
+            raise Fail("Template directory does not exist")
+        self.multi_run(lambda repo: update_template_repo(repo, self.template))
+
     #-----------------------
     # Utility methods
     #-----------------------
@@ -238,6 +252,9 @@ if __name__ == "__main__":
     parser_update = sub.add_parser('update', help='Update existing clone set')
     parser_update.add_argument('dir', metavar='dir', help='Directory containing the clone set to update')
 
+    # Update template
+    parser_update = sub.add_parser('update_template', help='Update template state')
+
     # TODO:
     # - build (creates some scripts: debug/release, shared/static, +install, docs)
     #   ??? or copy some files from template folder
@@ -246,7 +263,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # log.basicConfig(format='[%(levelname)s] %(message)s', level=log.DEBUG if args.v else log.WARNING)
-    log.basicConfig(format='[%(levelno)s] %(message)s', level=log.DEBUG if args.v else log.WARNING)
+    if args.v:
+        log.basicConfig(format='[%(levelno)s] %(message)s', level=log.DEBUG)
+    else:
+        log.basicConfig(format='%(message)s', level=log.WARNING)
+
     log.debug("Args: %s", args)
 
     try:
@@ -257,6 +278,8 @@ if __name__ == "__main__":
             w.create(args.dir, args.check, args.branch, args.force)
         elif args.cmd == "update":
             w.update(args.dir)
+        elif args.cmd == "update_template":
+            w.update_template()
         else:
             raise Fail("Bad command: %s" % args.cmd)
     except Fail as e:
