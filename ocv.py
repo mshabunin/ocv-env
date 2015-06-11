@@ -216,6 +216,17 @@ class Worker:
             raise Fail("Template directory does not exist")
         self.multi_run(lambda repo: update_template_repo(repo, self.template))
 
+    def status(self):
+        log.info("Status")
+        for d in os.listdir("."):
+            if not os.path.isfile(d) and os.path.exists(d) and os.path.exists(os.path.join(d, "opencv", ".git")):
+                log.info("=== Directory '%s' ===", d)
+                for repo in config["repos"]:
+                    e = Executor()
+                    e.call(["git", "-C", os.path.join(d, repo), "rev-parse", "--abbrev-ref", "HEAD"])
+                    e.call(["git", "-C", os.path.join(d, repo), "status", "--porcelain"])
+                    log.info(repo + "\n" + "".join(["> " + line for line in e.finish()]))
+
     #-----------------------
     # Utility methods
     #-----------------------
@@ -255,6 +266,9 @@ if __name__ == "__main__":
     # Update template
     parser_update_template = sub.add_parser('update_template', help='Update template state')
 
+    # Overview
+    parser_init = sub.add_parser('status', help='Show current folder overview')
+
     # TODO:
     # - build (creates some scripts: debug/release, shared/static, +install, docs)
     #   ??? or copy some files from template folder
@@ -280,6 +294,8 @@ if __name__ == "__main__":
             w.update(args.dir)
         elif args.cmd == "update_template":
             w.update_template()
+        elif args.cmd == "status":
+            w.status()
         else:
             raise Fail("Bad command: %s" % args.cmd)
     except Fail as e:
