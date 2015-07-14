@@ -12,34 +12,9 @@ from tempfile import NamedTemporaryFile
 
 # Some config here
 config = {
-
 "repos": ["opencv", "opencv_contrib", "opencv_extra"],
-
 "upstream": "https://github.com/Itseez/%(repo)s.git",
-
 "custom": "git@github.com:mshabunin/%(repo)s.git",
-
-"env_script":
-"""# Some useful environment variables here
-export OPENCV_TEST_DATA_PATH=%(path)s/opencv_extra/testdata
-export ANDROID_NDK=/home/maksim/android-ndk-r10
-export ANDROID_SDK=/home/maksim/android-sdk-linux
-export PYTHONPATH=%(path)s/build/lib
-""",
-
-"subl_project":
-"""{
-    "folders":
-    [
-        {
-            "path":"opencv"
-        },
-        {
-            "path":"opencv_contrib"
-        }
-    ]
-}
-"""
 }
 
 class Executor:
@@ -137,13 +112,16 @@ def copy_template_files(repo, src, dst):
                 log.debug("%s: create %s", repo, d)
                 os.mkdir(d)
 
-def init_env_script(path):
-    with open(os.path.join(os.path.abspath(path), "env.sh"), "w") as f:
-        f.write(config['env_script'] % {'path':os.path.abspath(path)})
-
-def init_subl_project(path):
-    with open(os.path.join(os.path.abspath(path), "ocv.sublime-project"), "w") as f:
-        f.write(config['subl_project'])
+def copy_script_files(src, dst):
+    log.debug("Walking files: %s", src)
+    for path, _, names in os.walk(src):
+        for name in names:
+            if name[-3:] == ".in":
+                log.debug("One file: %s / %s", path, name)
+                with open(os.path.join(path, name), "r") as f:
+                    lines = f.readlines()
+                with open(os.path.join(dst, name[:-3]), "w") as f:
+                    f.writelines([l % {'path':os.path.abspath(dst)} for l in lines])
 
 def check_template_folder(folder):
     # TODO: also check contains - mirrors
@@ -199,8 +177,7 @@ class Worker:
                 raise Fail("Bad argument: %s, should be in form user:branch" % check)
         os.makedirs(os.path.join(dir, "build"))
         self.multi_run(lambda repo: init_one_repo(repo, self.template, dir, checkout_branch, user, branch))
-        init_env_script(dir)
-        init_subl_project(dir)
+        copy_script_files(os.path.join(self.template, "files"), dir)
 
     def update(self, dir):
         log.info("Update")
@@ -280,7 +257,7 @@ if __name__ == "__main__":
     if args.v:
         log.basicConfig(format='[%(levelno)s] %(message)s', level=log.DEBUG)
     else:
-        log.basicConfig(format='%(message)s', level=log.WARNING)
+        log.basicConfig(format='%(message)s', level=log.INFO)
 
     log.debug("Args: %s", args)
 

@@ -1,0 +1,9 @@
+DIR=%(path)s
+
+cd $DIR/build && rm -rf *
+cmake -GNinja\
+    ../opencv \
+    -DOPENCV_EXTRA_MODULES_PATH=../opencv_contrib/modules \
+    -DCMAKE_INSTALL_PREFIX=install \
+    -DBUILD_EXAMPLES=ON
+ninja
