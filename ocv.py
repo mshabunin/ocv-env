@@ -92,36 +92,30 @@ def init_one_repo(repo, template, path, branch, check_user=None, check_branch=No
         else:
             log.info("%s: skip pull %s:%s", repo, check_user, check_branch)
     e.call(["git", "-C", r, "remote", "-v"])
-    if os.path.exists(t):
-        copy_template_files(repo, t, r)
     log.debug("%s: done", repo)
     return e.finish()
 
-def copy_template_files(repo, src, dst):
-    for root, dirs, files in os.walk(src):
-        rel = os.path.relpath(root, src)
-        for f in files:
-            s = os.path.join(src, rel, f)
-            d = os.path.join(dst, rel, f)
-            if not os.path.exists(d):
-                log.debug("%s: copy %s", repo, rel)
-                copy2(s, d)
-        for f in dirs:
-            d = os.path.join(dst, rel, f)
-            if not os.path.exists(d):
-                log.debug("%s: create %s", repo, d)
-                os.mkdir(d)
-
-def copy_script_files(src, dst):
+def copy_files(src, dst):
     log.debug("Walking files: %s", src)
     for path, _, names in os.walk(src):
         for name in names:
+            input_file = os.path.join(path, name)
+            with open(input_file, "r") as f:
+                lines = f.readlines()
+            outname = name
             if name[-3:] == ".in":
-                log.debug("One file: %s / %s", path, name)
-                with open(os.path.join(path, name), "r") as f:
-                    lines = f.readlines()
-                with open(os.path.join(dst, name[:-3]), "w") as f:
-                    f.writelines([l % {'path':os.path.abspath(dst)} for l in lines])
+                outname = name[:-3]
+                lines = [l % {'path':os.path.abspath(dst)} for l in lines]
+            output_dir = os.path.join(dst, os.path.relpath(path, src))
+            output_file = os.path.join(output_dir, outname)
+            try:
+                os.makedirs(output_dir)
+                pass
+            except Exception, e:
+                log.debug("Can't create path: %s", output_dir)
+            log.debug("One file: %s -> %s", input_file, output_file)
+            with open(output_file, "w") as f:
+                f.writelines(lines)
 
 def check_template_folder(folder):
     # TODO: also check contains - mirrors
@@ -177,7 +171,7 @@ class Worker:
                 raise Fail("Bad argument: %s, should be in form user:branch" % check)
         os.makedirs(os.path.join(dir, "build"))
         self.multi_run(lambda repo: init_one_repo(repo, self.template, dir, checkout_branch, user, branch))
-        copy_script_files(os.path.join(self.template, "files"), dir)
+        copy_files(os.path.join(self.template, "files"), dir)
 
     def update(self, dir):
         log.info("Update")
