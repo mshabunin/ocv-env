@@ -110,9 +110,9 @@ def copy_files(src, dst):
             output_file = os.path.join(output_dir, outname)
             try:
                 os.makedirs(output_dir)
-                pass
             except Exception, e:
-                log.debug("Can't create path: %s", output_dir)
+                # log.debug("Can't create path: %s", output_dir)
+                pass
             log.debug("One file: %s -> %s", input_file, output_file)
             with open(output_file, "w") as f:
                 f.writelines(lines)
