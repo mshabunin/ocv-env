@@ -10,12 +10,11 @@ import logging as log
 import concurrent.futures
 from tempfile import NamedTemporaryFile
 
-# Some config here
-config = {
-"repos": ["opencv", "opencv_contrib", "opencv_extra"],
-"upstream": "https://github.com/Itseez/%(repo)s.git",
-"custom": "git@github.com:mshabunin/%(repo)s.git",
-}
+def get_upstream_url(user, repo):
+    return "https://github.com/%(user)s/%(repo)s.git" % locals()
+
+def get_user_copy_url(user, repo):
+    return "git@github.com:%(user)s/%(repo)s.git" % locals()
 
 class Executor:
     def __init__(self):
@@ -26,11 +25,11 @@ class Executor:
         self.out.seek(0)
         return self.out.readlines()
 
-def init_one_template(repo, template):
+def init_one_template(repo, template, upstream_user):
     t = os.path.abspath(os.path.join(template, repo)) + ".git"
     e = Executor()
     log.info("%s: init template", repo)
-    e.call(["git", "clone", "--mirror", config['upstream'] % {'repo':repo}, t])
+    e.call(["git", "clone", "--mirror", get_upstream_url(upstream_user, repo), t])
     e.call(["git", "-C", t, "remote", "set-url", "--push", "origin", "bad_url"])
     e.call(["git", "-C", t, "config", "--unset-all", "remote.origin.fetch"])
     e.call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"])
@@ -56,7 +55,7 @@ def update_template_repo(repo, path):
     return e.finish()
 
 def is_branch_exist(repo, check_user, check_branch):
-    url = "git@github.com:%s/%s.git" % (check_user, repo)
+    url = get_user_copy_url(check_user, repo)
     try:
         branches = check_output(["git", "ls-remote","--heads", url], universal_newlines=True, stderr=STDOUT)
         rx = search("refs/heads/%s$" % check_branch, branches, MULTILINE)
@@ -68,23 +67,23 @@ def is_branch_exist(repo, check_user, check_branch):
         return False
     return True
 
-def init_one_repo(repo, template, path, branch, check_user=None, check_branch=None):
+def init_one_repo(repo, template, path, branch, upstream_user, user, check_user=None, check_branch=None):
     r = os.path.abspath(os.path.join(path, repo))
     t = os.path.abspath(os.path.join(template, repo))
     e = Executor()
     log.info("%s: clone", repo)
     e.call(["git", "clone", t, r])
-    e.call(["git", "-C", r, "remote", "add", "upstream", config['upstream'] % {'repo':repo}])
+    e.call(["git", "-C", r, "remote", "add", "upstream", get_upstream_url(upstream_user, repo)])
     e.call(["git", "-C", r, "remote", "set-url", "--push", "upstream", "bad_url"])
     e.call(["git", "-C", r, "remote", "add", "template", t + ".git"])
     e.call(["git", "-C", r, "remote", "set-url", "--push", "template", "bad_url"])
-    e.call(["git", "-C", r, "remote", "set-url", "origin", config['custom'] % {'repo':repo}])
+    e.call(["git", "-C", r, "remote", "set-url", "origin", get_user_copy_url(user, repo)])
     log.info("%s: fetch %s", repo, branch)
     e.call(["git", "-C", r, "fetch", "upstream", branch])
     e.call(["git", "-C", r, "checkout", "upstream/%s" % branch, "-B", branch])
     if not (check_user is None or check_branch is None):
         if is_branch_exist(repo, check_user, check_branch):
-            url = "git@github.com:%s/%s.git" % (check_user, repo)
+            url = get_user_copy_url(check_user, repo)
             log.info("%s: pull %s:%s", repo, check_user, check_branch)
             e.call(["git", "-C", r, "remote", "add", "checked", url])
             e.call(["git", "-C", r, "remote", "set-url", "--push", "checked", "bad_url"])
@@ -124,7 +123,6 @@ def check_template_folder(folder):
     return True
 
 def check_clone_folder(folder):
-    # TODO: check contains - opencv/opencv_contrib/opencv_extra
     if not os.path.exists(folder):
         return False
     return True
@@ -136,10 +134,12 @@ class Fail(Exception):
         return "ERROR" if self.t is None else self.t
 
 class Worker:
-    def __init__(self, repos, template, slow):
+    def __init__(self, repos, template, slow, upstream_user, user):
         self.repos = repos
         self.template = template
         self.slow = slow
+        self.upstream_user = upstream_user
+        self.user = user
 
     #-----------------------
     # Command handlers
@@ -170,7 +170,7 @@ class Worker:
             else:
                 raise Fail("Bad argument: %s, should be in form user:branch" % check)
         os.makedirs(os.path.join(dir, "build"))
-        self.multi_run(lambda repo: init_one_repo(repo, self.template, dir, checkout_branch, user, branch))
+        self.multi_run(lambda repo: init_one_repo(repo, self.template, dir, checkout_branch, self.upstream_user, self.user, user, branch))
         copy_files(os.path.join(self.template, "files"), dir)
 
     def update(self, dir):
@@ -190,13 +190,24 @@ class Worker:
     def status(self):
         log.info("Status")
         for d in os.listdir("."):
-            if not os.path.isfile(d) and os.path.exists(d) and os.path.exists(os.path.join(d, "opencv", ".git")):
-                log.info("=== Directory '%s' ===", d)
-                for repo in config["repos"]:
-                    e = Executor()
-                    e.call(["git", "-C", os.path.join(d, repo), "rev-parse", "--abbrev-ref", "HEAD"])
-                    e.call(["git", "-C", os.path.join(d, repo), "status", "--porcelain"])
-                    log.info(repo + "\n" + "".join(["> " + line for line in e.finish()]))
+            if not os.path.isfile(d) and os.path.exists(d):
+                log.info("\n=== Directory '%s' ===", d)
+                for repo in self.repos:
+                    if os.path.exists(os.path.join(d, repo)):
+                        e = Executor()
+                        e.call(["git", "-C", os.path.join(d, repo), "rev-parse", "--abbrev-ref", "HEAD"])
+                        branch = "".join(e.finish()).strip()
+                        e = Executor()
+                        e.call(["git", "-C", os.path.join(d, repo), "status", "--porcelain"])
+                        status = "".join(["> " + line for line in e.finish()]).strip()
+                        if len(status) > 0:
+                            status = "\n" + status
+                            # status = " *"
+                        else:
+                            status = ""
+                        log.info("%(repo)s @ %(branch)s%(status)s" % locals())
+                    else:
+                        log.info("%(repo)s - does not exist" % locals())
 
     #-----------------------
     # Utility methods
@@ -218,6 +229,9 @@ if __name__ == "__main__":
     parser.add_argument('--template', default='.template', metavar='dir', help='Template dir with local mirrors (default is ".template")')
     parser.add_argument('-v', action='store_true', help='Verbose logging')
     parser.add_argument('--slow', action='store_true', help='Do not use multiprocessing')
+    parser.add_argument('--user', required=True, help="Main user account")
+    parser.add_argument('--upstream', required=True, help="Upstream user account")
+    parser.add_argument('--repos', required=True, help="Comma separated repository list")
     sub = parser.add_subparsers(title='Commands', dest='cmd')
 
     # Init new template folder
@@ -249,14 +263,15 @@ if __name__ == "__main__":
 
     # log.basicConfig(format='[%(levelname)s] %(message)s', level=log.DEBUG if args.v else log.WARNING)
     if args.v:
-        log.basicConfig(format='[%(levelno)s] %(message)s', level=log.DEBUG)
+        # log.basicConfig(format='[%(levelno)s] %(message)s', level=log.DEBUG)
+        log.basicConfig(format='%(message)s', level=log.DEBUG)
     else:
         log.basicConfig(format='%(message)s', level=log.INFO)
 
     log.debug("Args: %s", args)
 
     try:
-        w = Worker(config['repos'], args.template, args.slow)
+        w = Worker(args.repos.split(","), args.template, args.slow, args.upstream, args.user)
         if args.cmd == "init":
             w.init()
         elif args.cmd == "create":
