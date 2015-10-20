@@ -2,9 +2,9 @@
 
 from argparse import ArgumentParser
 from re import search, MULTILINE
-from subprocess import call, check_output, STDOUT, CalledProcessError
+from subprocess import check_output, STDOUT, CalledProcessError
 import os.path
-from shutil import rmtree, copy2
+from shutil import rmtree, copy2, move
 import sys
 import logging as log
 import concurrent.futures
@@ -16,43 +16,40 @@ def get_upstream_url(user, repo):
 def get_user_copy_url(user, repo):
     return "git@github.com:%(user)s/%(repo)s.git" % locals()
 
-class Executor:
-    def __init__(self):
-        self.out = NamedTemporaryFile()
-    def call(self, cmd):
-        call(cmd, stdout=self.out, stderr=STDOUT)
-    def finish(self):
-        self.out.seek(0)
-        return self.out.readlines()
+def execute(cmd):
+    try:
+        res = check_output(cmd, stderr = STDOUT).decode("latin-1").splitlines()
+    except CalledProcessError as e:
+        return e.output.decode("latin-1").splitlines()
+    return res
 
 def init_one_template(repo, template, upstream_user):
     t = os.path.abspath(os.path.join(template, repo)) + ".git"
-    e = Executor()
+    out = []
     log.info("%s: init template", repo)
-    e.call(["git", "clone", "--mirror", get_upstream_url(upstream_user, repo), t])
-    e.call(["git", "-C", t, "remote", "set-url", "--push", "origin", "bad_url"])
-    e.call(["git", "-C", t, "config", "--unset-all", "remote.origin.fetch"])
-    e.call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"])
-    e.call(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*"])
+    out += execute(["git", "clone", "--mirror", get_upstream_url(upstream_user, repo), t])
+    out += execute(["git", "-C", t, "remote", "set-url", "--push", "origin", "bad_url"])
+    out += execute(["git", "-C", t, "config", "--unset-all", "remote.origin.fetch"])
+    out += execute(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"])
+    out += execute(["git", "-C", t, "config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*"])
     log.debug("%s: done", repo)
-    return e.finish()
+    return out, repo
 
 def update_one_repo(repo, path):
     r = os.path.join(path, repo)
-    e = Executor()
+    out = []
     for remote in ["template", "upstream", "origin"]:
         log.info("%s: update %s", repo, remote)
-        e.call(["git", "-C", r, "fetch", remote, "-v"])
+        out += execute(["git", "-C", r, "fetch", remote, "-v"])
     log.debug("%s: done", repo)
-    return e.finish()
+    return out, repo
 
 def update_template_repo(repo, path):
     r = os.path.join(path, repo) + ".git"
-    e = Executor()
     log.info("%s: template update", repo)
-    e.call(["git", "-C", r, "remote", "update", "--prune"])
+    out = execute(["git", "-C", r, "remote", "update", "--prune"])
     log.debug("%s: done", repo)
-    return e.finish()
+    return out, repo
 
 def is_branch_exist(repo, check_user, check_branch):
     url = get_user_copy_url(check_user, repo)
@@ -67,54 +64,69 @@ def is_branch_exist(repo, check_user, check_branch):
         return False
     return True
 
+def is_local_branch_eist(r, branch):
+    out = execute(["git", "-C", r, "branch", "-a"])
+
 def init_one_repo(repo, template, path, branch, upstream_user, user, check_user=None, check_branch=None):
     r = os.path.abspath(os.path.join(path, repo))
     t = os.path.abspath(os.path.join(template, repo))
-    e = Executor()
+    out = []
     log.info("%s: clone", repo)
-    e.call(["git", "clone", t, r])
-    e.call(["git", "-C", r, "remote", "add", "upstream", get_upstream_url(upstream_user, repo)])
-    e.call(["git", "-C", r, "remote", "set-url", "--push", "upstream", "bad_url"])
-    e.call(["git", "-C", r, "remote", "add", "template", t + ".git"])
-    e.call(["git", "-C", r, "remote", "set-url", "--push", "template", "bad_url"])
-    e.call(["git", "-C", r, "remote", "set-url", "origin", get_user_copy_url(user, repo)])
+    out += execute(["git", "clone", t, r])
+    out += execute(["git", "-C", r, "remote", "add", "upstream", get_upstream_url(upstream_user, repo)])
+    out += execute(["git", "-C", r, "remote", "set-url", "--push", "upstream", "bad_url"])
+    out += execute(["git", "-C", r, "remote", "add", "template", t + ".git"])
+    out += execute(["git", "-C", r, "remote", "set-url", "--push", "template", "bad_url"])
+    out += execute(["git", "-C", r, "remote", "set-url", "origin", get_user_copy_url(user, repo)])
     log.info("%s: fetch %s", repo, branch)
-    e.call(["git", "-C", r, "fetch", "upstream", branch])
-    e.call(["git", "-C", r, "checkout", "upstream/%s" % branch, "-B", branch])
+    out += execute(["git", "-C", r, "fetch", "upstream", branch])
+    out += execute(["git", "-C", r, "checkout", "upstream/%s" % branch, "-B", branch])
     if not (check_user is None or check_branch is None):
         if is_branch_exist(repo, check_user, check_branch):
             url = get_user_copy_url(check_user, repo)
             log.info("%s: pull %s:%s", repo, check_user, check_branch)
-            e.call(["git", "-C", r, "remote", "add", "checked", url])
-            e.call(["git", "-C", r, "remote", "set-url", "--push", "checked", "bad_url"])
-            e.call(["git", "-C", r, "pull", "--no-edit", "checked", check_branch])
+            out += execute(["git", "-C", r, "remote", "add", "checked", url])
+            out += execute(["git", "-C", r, "remote", "set-url", "--push", "checked", "bad_url"])
+            out += execute(["git", "-C", r, "pull", "--no-edit", "checked", check_branch])
         else:
             log.info("%s: skip pull %s:%s", repo, check_user, check_branch)
-    e.call(["git", "-C", r, "remote", "-v"])
+    out += execute(["git", "-C", r, "remote", "-v"])
     log.debug("%s: done", repo)
-    return e.finish()
+    return out, repo
+
+def checkout_one_repo(repo, path, branch):
+    r = os.path.abspath(os.path.join(path, repo))
+    log.info("%s: checkout %s", repo, branch)
+    out = execute(["git", "-C", r, "checkout", branch])
+    return out, repo
+
 
 def copy_files(src, dst):
-    log.debug("Walking files: %s", src)
+    log.debug("Copying files from %s", src)
     for path, _, names in os.walk(src):
         for name in names:
+            # Determine src and dst paths
             input_file = os.path.join(path, name)
-            with open(input_file, "r") as f:
-                lines = f.readlines()
-            outname = name
-            if name[-3:] == ".in":
-                outname = name[:-3]
-                lines = [l % {'path':os.path.abspath(dst)} for l in lines]
             output_dir = os.path.join(dst, os.path.relpath(path, src))
-            output_file = os.path.join(output_dir, outname)
+            output_file = os.path.normpath(os.path.join(output_dir, name))
+            # Create folder and copy file into it
             try:
                 os.makedirs(output_dir)
-            except Exception, e:
-                # log.debug("Can't create path: %s", output_dir)
+            except Exception as e:
                 pass
-            log.debug("One file: %s -> %s", input_file, output_file)
-            with open(output_file, "w") as f:
-                f.writelines(lines)
+            copy2(input_file, output_file)
+            # Rename '*.in' files and replace template strings
+            if output_file[-3:] == ".in":
+                fixed_file = output_file[:-3]
+                move(output_file, fixed_file)
+                output_file = fixed_file
+                with open(output_file, "r") as f:
+                    lines = f.readlines()
+                lines = [l % {'path':os.path.abspath(dst)} for l in lines]
+                with open(output_file, "w") as f:
+                    f.writelines(lines)
+            # Done
+            log.debug("One file: %s", os.path.relpath(output_file, dst))
 
 def check_template_folder(folder):
     # TODO: also check contains - mirrors
@@ -181,6 +193,12 @@ class Worker:
             raise Fail("Clone directory does not exist")
         self.multi_run(lambda repo: update_one_repo(repo, dir))
 
+    def checkout(self, dir, branch):
+        log.info("Checkout")
+        if not check_clone_folder(dir):
+            raise Fail("Clone directory does not exist")
+        self.multi_run(lambda repo: checkout_one_repo(repo, dir, branch))
+
     def update_template(self):
         log.info("Update")
         if not check_template_folder(self.template):
@@ -194,18 +212,16 @@ class Worker:
                 log.info("\n=== Directory '%s' ===", d)
                 for repo in self.repos:
                     if os.path.exists(os.path.join(d, repo)):
-                        e = Executor()
-                        e.call(["git", "-C", os.path.join(d, repo), "rev-parse", "--abbrev-ref", "HEAD"])
-                        branch = "".join(e.finish()).strip()
-                        e = Executor()
-                        e.call(["git", "-C", os.path.join(d, repo), "status", "--porcelain"])
-                        status = "".join(["> " + line for line in e.finish()]).strip()
-                        if len(status) > 0:
-                            status = "\n" + status
-                            # status = " *"
+                        # determine branch
+                        out = execute(["git", "-C", os.path.join(d, repo), "rev-parse", "--abbrev-ref", "HEAD"])
+                        branch = "".join(out).strip()
+                        # determine file status
+                        out = execute(["git", "-C", os.path.join(d, repo), "status", "--porcelain"])
+                        if len(out) > 0:
+                            status = "\n".join(["|| " + line for line in out]).strip()
+                            log.info("%(repo)s @ %(branch)s%(status)s" % locals())
                         else:
-                            status = ""
-                        log.info("%(repo)s @ %(branch)s%(status)s" % locals())
+                            log.info("%(repo)s @ %(branch)s" % locals())
                     else:
                         log.info("%(repo)s - does not exist" % locals())
 
@@ -214,12 +230,11 @@ class Worker:
     #-----------------------
     def multi_run(self, func):
         if self.slow:
-            for out in map(func, self.repos):
-                log.debug("Output:\n" + "".join(["> " + line for line in out]))
+            theMap = map
         else:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as e:
-                for out in e.map(func, self.repos):
-                    log.debug("Output:\n" + "".join(["> " + line for line in out]))
+            theMap = concurrent.futures.ThreadPoolExecutor(max_workers=3).map
+        for out, r in theMap(func, self.repos):
+            log.debug("\n=== Output [%s] ===\n" % r + "\n".join(["|| " + line for line in out]))
 
 #----------------------
 # Main
@@ -254,6 +269,11 @@ if __name__ == "__main__":
     # Overview
     parser_init = sub.add_parser('status', help='Show current folder overview')
 
+    # Checkout
+    parser_checkout = sub.add_parser('checkout', help='Update current files state')
+    parser_checkout.add_argument('dir', metavar='dir', help='Directory containing the clone set to update')
+    parser_checkout.add_argument('branch', metavar='branch', help='Branch to checkout: will be passed to git')
+
     # TODO:
     # - build (creates some scripts: debug/release, shared/static, +install, docs)
     #   ??? or copy some files from template folder
@@ -282,6 +302,8 @@ if __name__ == "__main__":
             w.update_template()
         elif args.cmd == "status":
             w.status()
+        elif args.cmd == "checkout":
+            w.checkout(args.dir, args.branch)
         else:
             raise Fail("Bad command: %s" % args.cmd)
     except Fail as e:
