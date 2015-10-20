@@ -64,9 +64,6 @@ def is_branch_exist(repo, check_user, check_branch):
         return False
     return True
 
-def is_local_branch_eist(r, branch):
-    out = execute(["git", "-C", r, "branch", "-a"])
-
 def init_one_repo(repo, template, path, branch, upstream_user, user, check_user=None, check_branch=None):
     r = os.path.abspath(os.path.join(path, repo))
     t = os.path.abspath(os.path.join(template, repo))
