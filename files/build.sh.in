@@ -1,11 +1,19 @@
 #!/bin/bash
 
 DIR=%(path)s
+BUILDDIR=$DIR/build
 
-cd $DIR/build && rm -rf *
+export PATH=/usr/lib/ccache:$PATH
+
+if [ ! -d $BUILDDIR ] ; then
+    mkdir $BUILDDIR
+fi
+
+pushd $BUILDDIR && rm -rf *
 cmake -GNinja\
     ../opencv \
     -DOPENCV_EXTRA_MODULES_PATH=../opencv_contrib/modules \
     -DCMAKE_INSTALL_PREFIX=install \
     -DBUILD_EXAMPLES=ON
 ninja
+popd

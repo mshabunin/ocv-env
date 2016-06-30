@@ -1,2 +1,2 @@
-alias ocv='~/.ocv/ocv.py -v --user mshabunin --upstream Itseez --repos opencv,opencv_contrib,opencv_extra'
+alias ocv='~/.ocv/ocv.py -v --template /home/maksim/workspace/.template --user mshabunin --upstream Itseez --repos opencv,opencv_contrib,opencv_extra'
 #alias ocv='~/.ocv/ocv.py'

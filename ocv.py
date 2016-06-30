@@ -69,7 +69,7 @@ def init_one_repo(repo, template, path, branch, upstream_user, user, check_user=
     t = os.path.abspath(os.path.join(template, repo))
     out = []
     log.info("%s: clone", repo)
-    out += execute(["git", "clone", t, r])
+    out += execute(["git", "clone", "-q", t, r])
     out += execute(["git", "-C", r, "remote", "add", "upstream", get_upstream_url(upstream_user, repo)])
     out += execute(["git", "-C", r, "remote", "set-url", "--push", "upstream", "bad_url"])
     out += execute(["git", "-C", r, "remote", "add", "template", t + ".git"])
@@ -81,12 +81,13 @@ def init_one_repo(repo, template, path, branch, upstream_user, user, check_user=
     if not (check_user is None or check_branch is None):
         if is_branch_exist(repo, check_user, check_branch):
             url = get_user_copy_url(check_user, repo)
-            log.info("%s: pull %s:%s", repo, check_user, check_branch)
+            log.info("%s: fetch %s:%s", repo, check_user, check_branch)
             out += execute(["git", "-C", r, "remote", "add", "checked", url])
             out += execute(["git", "-C", r, "remote", "set-url", "--push", "checked", "bad_url"])
-            out += execute(["git", "-C", r, "pull", "--no-edit", "checked", check_branch])
+            out += execute(["git", "-C", r, "fetch", "checked", check_branch])
+            out += execute(["git", "-C", r, "checkout", "-B", "checked-%s" % check_branch, "checked/%s" % check_branch])
         else:
-            log.info("%s: skip pull %s:%s", repo, check_user, check_branch)
+            log.info("%s: skip fetch %s:%s", repo, check_user, check_branch)
     out += execute(["git", "-C", r, "remote", "-v"])
     log.debug("%s: done", repo)
     return out, repo
@@ -119,7 +120,7 @@ def copy_files(src, dst):
                 output_file = fixed_file
                 with open(output_file, "r") as f:
                     lines = f.readlines()
-                lines = [l % {'path':os.path.abspath(dst)} for l in lines]
+                lines = [l % {'path':os.path.abspath(dst), 'alias':dst} for l in lines]
                 with open(output_file, "w") as f:
                     f.writelines(lines)
             # Done
