@@ -1,0 +1,80 @@
+#!/bin/bash
+set -e
+set -x
+
+DIR=%(path)s
+
+export PATH=/usr/lib/ccache:$PATH
+export ANDROID_NDK=/home/maksim/android-ndk-r10e
+export ANDROID_SDK=/home/maksim/android-sdk-linux
+
+build_one()
+{
+    BUILDDIR=$DIR/$1
+    shift
+
+    if [ ! -d ${BUILDDIR} ] ; then
+        mkdir ${BUILDDIR}
+    fi
+
+    pushd ${BUILDDIR} && rm -rf *
+    cmake \
+        -GNinja \
+        ../opencv \
+        -DWITH_VTK=OFF \
+        -DBUILD_EXAMPLES=ON \
+        -DOPENCV_EXTRA_MODULES_PATH=../opencv_contrib/modules \
+        -DCMAKE_INSTALL_PREFIX=install \
+        "$@"
+    ninja
+    popd
+}
+
+
+build_one \
+    build-linux \
+    -DENABLE_PRECOMPILED_HEADERS=OFF \
+    -DDOWNLOAD_EXTERNAL_TEST_DATA=ON
+
+build_one \
+    build-static-distrib-linux \
+    -DENABLE_PRECOMPILED_HEADERS=OFF \
+    -DBUILD_opencv_sfm=OFF \
+    -DBUILD_SHARED_LIBS=OFF -DINSTALL_CREATE_DISTRIB=ON
+
+build_one \
+    build-shared-distrib-linux \
+    -DENABLE_PRECOMPILED_HEADERS=OFF \
+    -DBUILD_SHARED_LIBS=ON -DINSTALL_CREATE_DISTRIB=ON
+
+build_one \
+    build-windows \
+    -DCMAKE_TOOLCHAIN_FILE=/home/maksim/snippets/x86_64-w64-mingw.toolchain.cmake
+
+build_one \
+    build-static-distrib-windows \
+    -DCMAKE_TOOLCHAIN_FILE=/home/maksim/snippets/x86_64-w64-mingw.toolchain.cmake \
+    -DENABLE_PRECOMPILED_HEADERS=OFF \
+    -DBUILD_SHARED_LIBS=OFF -DINSTALL_CREATE_DISTRIB=ON
+
+build_one \
+    build-shared-distrib-windows \
+    -DCMAKE_TOOLCHAIN_FILE=/home/maksim/snippets/x86_64-w64-mingw.toolchain.cmake \
+    -DENABLE_PRECOMPILED_HEADERS=OFF \
+    -DBUILD_SHARED_LIBS=ON -DINSTALL_CREATE_DISTRIB=ON
+
+build_one \
+    build-arm \
+    -DCMAKE_TOOLCHAIN_FILE=../opencv/platforms/linux/arm-gnueabi.toolchain.cmake \
+    -DGCC_COMPILER_VERSION=4.8 \
+    -DENABLE_NEON=ON \
+    -DENABLE_VFPV3=ON
+
+build_one \
+    build-android \
+    -DCMAKE_TOOLCHAIN_FILE=../opencv/platforms/android/android.toolchain.cmake \
+    -DANDROID_ABI="armeabi-v7a with NEON" \
+    -DANDROID_TOOLCHAIN_NAME=arm-linux-androideabi-4.9 \
+    -DNDK_CCACHE=/usr/bin/ccache \
+    -DENABLE_PRECOMPILED_HEADERS=OFF
+

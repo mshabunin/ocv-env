@@ -1,0 +1,47 @@
+#!/bin/bash
+
+c=$1
+s=w-%(alias)s
+byobu-tmux has -t $s 2> /dev/null
+exists=$?
+
+create() {
+    s=$1
+    echo "== Creating new session: $s"
+    byobu-tmux new -s $s -n root -d -x 132 -y 43 -P
+    byobu-tmux neww -c build -n build
+    byobu-tmux neww -c opencv -n opencv
+    byobu-tmux neww -c opencv_contrib -n contrib
+    byobu-tmux neww -c opencv_extra -n extra
+}
+
+remove() {
+    s=$1
+    echo "== Removing session: $s"
+    byobu-tmux kill-session -t $s
+}
+
+if [ "$c" = "--help" -o "$c" = "-h" ] ; then
+    echo "Initialize tmux session for current workspace and attach to it"
+    echo "Usage: <script> [init|i|rm]"
+    echo "    init|i - recreate session and attach to it"
+    echo "    rm - just remove existing session, do not attach"
+    echo "    <empty> - create session if needed and attach to it"
+    exit 0
+elif [ "$c" = "init" -o "$c" = "i" ] ; then
+    echo "Initializing"
+    if [ "$exists" = "0" ]; then
+        remove $s
+    fi
+    create $s
+    byobu-tmux attach-session -d -t $s
+elif [ "$c" = "rm" ] ; then
+    if [ "$exists" = "0" ]; then
+        remove $s
+    fi
+else
+    if [ "$exists" = "1" ]; then
+        create $s
+    fi
+    byobu-tmux attach-session -d -t $s
+fi

@@ -1,0 +1,7 @@
+#!/bin/bash
+
+set -e
+
+ninja cpp-example-example
+rsync -az --delete bin lib carma1:test
+ssh carma1 'export LD_LIBRARY_PATH=./test/lib ; ./test/bin/cpp-example-example'
