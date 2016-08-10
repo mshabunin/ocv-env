@@ -2,6 +2,7 @@
 
 from argparse import ArgumentParser
 from re import search, MULTILINE
+import re
 from subprocess import check_output, STDOUT, CalledProcessError
 import os.path
 from shutil import rmtree, copy2, move
@@ -99,7 +100,7 @@ def checkout_one_repo(repo, path, branch):
     return out, repo
 
 
-def copy_files(src, dst):
+def copy_files(src, dst, msys):
     log.debug("Copying files from %s", src)
     for path, _, names in os.walk(src):
         for name in names:
@@ -120,7 +121,11 @@ def copy_files(src, dst):
                 output_file = fixed_file
                 with open(output_file, "r") as f:
                     lines = f.readlines()
-                lines = [l % {'path':os.path.abspath(dst), 'alias':dst} for l in lines]
+                full_path = os.path.abspath(dst)
+                if msys:
+                    full_path = re.sub(r'\\', '/', full_path)
+                    full_path = re.sub(r'^([C-Z]):', r'/\1', full_path)
+                lines = [l % {'path':full_path, 'alias':dst} for l in lines]
                 with open(output_file, "w") as f:
                     f.writelines(lines)
             # Done
@@ -144,12 +149,13 @@ class Fail(Exception):
         return "ERROR" if self.t is None else self.t
 
 class Worker:
-    def __init__(self, repos, template, slow, upstream_user, user):
+    def __init__(self, repos, template, slow, upstream_user, user, msys):
         self.repos = repos
         self.template = template
         self.slow = slow
         self.upstream_user = upstream_user
         self.user = user
+        self.msys = msys
 
     #-----------------------
     # Command handlers
@@ -181,7 +187,7 @@ class Worker:
                 raise Fail("Bad argument: %s, should be in form user:branch" % check)
         os.makedirs(os.path.join(dir, "build"))
         self.multi_run(lambda repo: init_one_repo(repo, self.template, dir, checkout_branch, self.upstream_user, self.user, user, branch))
-        copy_files(os.path.join(self.template, "files"), dir)
+        copy_files(os.path.join(self.template, "files"), dir, self.msys)
 
     def update(self, dir):
         log.info("Update")
@@ -242,33 +248,34 @@ if __name__ == "__main__":
     parser.add_argument('--template', default='.template', metavar='dir', help='Template dir with local mirrors (default is ".template")')
     parser.add_argument('-v', action='store_true', help='Verbose logging')
     parser.add_argument('--slow', action='store_true', help='Do not use multiprocessing')
+    parser.add_argument('--msys', action='store_true', help='Convert paths in templates to msys-compatible (e.g. /c/Users/username)')
     parser.add_argument('--user', required=True, help="Main user account")
     parser.add_argument('--upstream', required=True, help="Upstream user account")
     parser.add_argument('--repos', required=True, help="Comma separated repository list")
-    sub = parser.add_subparsers(title='Commands', dest='cmd')
+    parser_sub = parser.add_subparsers(title='Commands', dest='cmd')
 
     # Init new template folder
-    parser_init = sub.add_parser('init', help='Init fresh template')
+    parser_init = parser_sub.add_parser('init', help='Init fresh template')
 
     # Create new clone
-    parser_create = sub.add_parser('create', help='Create new clone set')
+    parser_create = parser_sub.add_parser('create', help='Create new clone set')
     parser_create.add_argument('dir', metavar='dir', help='Directory for clone set')
     parser_create.add_argument('--check', metavar='user:branch', help='GitHub user/branch to add as checked remote')
     parser_create.add_argument('--force', action='store_true', help='Remove existing repository')
     parser_create.add_argument('--branch', metavar='b', default='master', help='Branch to checkout by default')
 
     # Update existing clone
-    parser_update = sub.add_parser('update', help='Update existing clone set')
+    parser_update = parser_sub.add_parser('update', help='Update existing clone set')
     parser_update.add_argument('dir', metavar='dir', help='Directory containing the clone set to update')
 
     # Update template
-    parser_update_template = sub.add_parser('update_template', help='Update template state')
+    parser_update_template = parser_sub.add_parser('update_template', help='Update template state')
 
     # Overview
-    parser_init = sub.add_parser('status', help='Show current folder overview')
+    parser_init = parser_sub.add_parser('status', help='Show current folder overview')
 
     # Checkout
-    parser_checkout = sub.add_parser('checkout', help='Update current files state')
+    parser_checkout = parser_sub.add_parser('checkout', help='Update current files state')
     parser_checkout.add_argument('dir', metavar='dir', help='Directory containing the clone set to update')
     parser_checkout.add_argument('branch', metavar='branch', help='Branch to checkout: will be passed to git')
 
@@ -289,7 +296,7 @@ if __name__ == "__main__":
     log.debug("Args: %s", args)
 
     try:
-        w = Worker(args.repos.split(","), args.template, args.slow, args.upstream, args.user)
+        w = Worker(args.repos.split(","), args.template, args.slow, args.upstream, args.user, args.msys)
         if args.cmd == "init":
             w.init()
         elif args.cmd == "create":

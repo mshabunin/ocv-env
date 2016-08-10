@@ -14,7 +14,7 @@ Installation:
 ```
 workspace
 ├── .template/ - folder with local mirrors for each repository
-│   ├── opencv/ - this folder will be copied after new clone set is created
+│   ├── files/ - this folder will be copied after new clone set is created
 │   ├── opencv_contrib.git/ - local mirror
 │   ├── opencv_extra.git/ - local mirror
 │   └── opencv.git/ - local mirror
