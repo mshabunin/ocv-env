@@ -159,7 +159,7 @@ class Worker:
         if check_template_folder(self.template):
             raise Fail("Template directory already exists")
         os.makedirs(os.path.abspath(self.template))
-        self.multi_run(lambda repo: init_one_template(repo, self.template))
+        self.multi_run(lambda repo: init_one_template(repo, self.template, self.upstream_user))
 
     def create(self, dir, check, checkout_branch, force):
         log.info("Create")
