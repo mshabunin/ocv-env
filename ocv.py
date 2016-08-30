@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 from argparse import ArgumentParser
 from re import search, MULTILINE
